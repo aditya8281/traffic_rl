@@ -9,19 +9,16 @@ class TrafficEnv(gym.Env):
 
         super(TrafficEnv, self).__init__()
 
-        # Actions:
-        # 0 = North-South green
-        # 1 = East-West green
         self.action_space = spaces.Discrete(2)
 
-        # State:
-        # [north, south, east, west, current_signal]
         self.observation_space = spaces.Box(
             low=0,
-            high=100,
-            shape=(5,),
+            high=500,
+            shape=(7,),
             dtype=np.float32
         )
+
+        self.max_steps = 200
 
         self.reset()
 
@@ -29,70 +26,135 @@ class TrafficEnv(gym.Env):
 
         super().reset(seed=seed)
 
-        # Random cars at start
         self.cars = np.random.randint(
             0,
-            20,
+            10,
             size=4
         )
 
-        # Current green signal
         self.current_green = 0
 
-        # Step counter
         self.steps = 0
+
+        self.ns_wait = 0
+        self.ew_wait = 0
 
         return self._get_state(), {}
 
     def _get_state(self):
 
         return np.array([
-            self.cars[0],  # north
-            self.cars[1],  # south
-            self.cars[2],  # east
-            self.cars[3],  # west
-            self.current_green
+
+            self.cars[0],
+            self.cars[1],
+            self.cars[2],
+            self.cars[3],
+
+            self.current_green,
+
+            self.ns_wait,
+            self.ew_wait
+
         ], dtype=np.float32)
 
     def step(self, action):
 
+        switch_penalty = 0
+
+        if action != self.current_green:
+            switch_penalty = 1
+
         self.current_green = action
 
-        # Cars pass depending on signal
+        # NS Green
         if action == 0:
 
-            # North-South green
-            self.cars[0] = max(0, self.cars[0] - 5)
-            self.cars[1] = max(0, self.cars[1] - 5)
+            passed = (
+                min(5, self.cars[0])
+                + min(5, self.cars[1])
+            )
 
+            self.cars[0] = max(
+                0,
+                self.cars[0] - 5
+            )
+
+            self.cars[1] = max(
+                0,
+                self.cars[1] - 5
+            )
+
+            self.ns_wait = 0
+
+            self.ew_wait += (
+                self.cars[2]
+                + self.cars[3]
+            )
+
+        # EW Green
         else:
 
-            # East-West green
-            self.cars[2] = max(0, self.cars[2] - 5)
-            self.cars[3] = max(0, self.cars[3] - 5)
+            passed = (
+                min(5, self.cars[2])
+                + min(5, self.cars[3])
+            )
 
-        # New incoming cars
-        self.cars += np.random.randint(
-            0,
-            4,
+            self.cars[2] = max(
+                0,
+                self.cars[2] - 5
+            )
+
+            self.cars[3] = max(
+                0,
+                self.cars[3] - 5
+            )
+
+            self.ew_wait = 0
+
+            self.ns_wait += (
+                self.cars[0]
+                + self.cars[1]
+            )
+
+        # Dynamic traffic generation
+        incoming = np.random.poisson(
+            lam=np.random.uniform(0.5, 2.0),
             size=4
         )
 
-        # Total waiting cars
+        self.cars += incoming
+
         waiting_time = np.sum(self.cars)
 
-        # Reward
-        reward = -waiting_time
+        total_wait = (
+            self.ns_wait
+            + self.ew_wait
+        )
+
+        # Reward shaping
+        reward = (
+            passed * 2
+            - 0.2 * waiting_time
+            - 0.01 * total_wait
+            - 0.5 * switch_penalty
+        )
+
+        if waiting_time < 10:
+            reward += 5
+
+        if waiting_time > 60:
+            reward -= 10
 
         self.steps += 1
 
-        # Episode ends after fixed steps
-        done = self.steps >= 100
+        terminated = (
+            self.steps >= self.max_steps
+        )
 
         return (
             self._get_state(),
             reward,
-            done,
+            terminated,
             False,
             {}
         )
