@@ -230,6 +230,4 @@ The PPO agent learns adaptive traffic control strategies that outperform random 
 
 # Author
 
-Aditya
-
-```
+Aditya Rathod
